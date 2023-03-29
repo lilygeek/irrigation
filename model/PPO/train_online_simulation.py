@@ -58,8 +58,8 @@ def main(args,config):
     config_profile = args.config
     p_v = [eval(i) for i in config[config_profile]['p_v'].split(',')]
     p_a = [eval(i) for i in config[config_profile]['p_a'].split(',')]
-    v_fc = int(config[config_profile]['v_fc'])
-    v_mad = int(config[config_profile]['v_mad'])
+    v_fc = eval(config[config_profile]['v_fc'])
+    v_mad = eval(config[config_profile]['v_mad'])
     has_continuous_action_space = True
 
     max_single_seq = 30
@@ -91,7 +91,10 @@ def main(args,config):
     print("Started training at (GMT) : ", start_time)
 
     print("============================================================================================")
-
+    
+    path = '../../result/model/PPO_'+str(max_single_seq)+'_'+str(irrigation_time)+'_'+config_profile+'/'
+    
+    os.makedirs(path)
     for i_epoch in range(1000):
         count = 0
         total_reward = 0
@@ -130,7 +133,7 @@ def main(args,config):
                     else:
                         reward = p_v[1]*(v_mad - next_water)+p_a[2]*action
                     reward = -np.squeeze(reward);
-                    print(water,action,next_water,reward)
+                    #print(water,action,next_water,reward)
 
                     total_reward = total_reward + reward
                     total_water = total_water + next_water
@@ -152,8 +155,6 @@ def main(args,config):
             agent.decay_action_std(action_std_decay_rate, min_action_std)
 
         if i_epoch%10==0:
-            path = '../../result/model/PPO_'+str(max_single_seq)+'_'+str(irrigation_time)+'_'+config_profile+'/'
-            os.makedirs(path)
             checkpoint_pth = path+'model_'+ str(i_epoch) +'.pkl'
             agent.save(checkpoint_pth)
         start = 0
