@@ -1,0 +1,5 @@
+result/
+data/
+configs/
+*.pptx
+.DS_Store
