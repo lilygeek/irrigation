@@ -2,6 +2,7 @@ import os
 
 os.environ['KMP_DUPLICATE_LIB_OK']='True'
 import argparse
+import configparser
 import pickle
 from collections import namedtuple
 from itertools import count
@@ -45,16 +46,6 @@ num_action = 1
 Transition = namedtuple('Transition', ['state', 'action', 'a_log_prob', 'reward', 'next_state'])
 
 p=[0.95631999,0.31006727,8.49262761,0.01503441]
-'''
-p_v = [3,10]
-p_a = [8,3,1]
-'''
-p_v = [10,3]
-p_a = [16,6,1]
-
-v_fc = 3.84
-
-v_mad = 3.84*0.9
 
 def simulator(v,at,pt,et):
     v = p[0]*v+p[1]*(at+pt)+p[2]*et+p[3]
@@ -62,8 +53,13 @@ def simulator(v,at,pt,et):
 
 
 
-def main():
+def main(args,config):
     #agent = PPO()
+    config_profile = args.config
+    p_v = [eval(i) for i in config[config_profile]['p_v'].split(',')]
+    p_a = [eval(i) for i in config[config_profile]['p_a'].split(',')]
+    v_fc = int(config[config_profile]['v_fc'])
+    v_mad = int(config[config_profile]['v_mad'])
     has_continuous_action_space = True
 
     max_single_seq = 30
@@ -83,9 +79,8 @@ def main():
 
     random_seed = 0         # set random seed if required (0 = no random seed)
     agent = PPO(num_state,num_action,lr_actor,lr_critic,gamma,K_epochs,eps_clip,has_continuous_action_space,action_std)
-    str(time.time())[:10]
     
-    writer = SummaryWriter('../../result/log/runs/PPO_'+str(max_single_seq)+str(time.time())[:10]+'/')
+    writer = SummaryWriter('../../result/log/runs/PPO_'+str(irrigation_time)+'_'+str(max_single_seq)+'_'+config_profile+'/')
 
     #data = pd.read_excel('../data/10_sackett_weather_for_simulation.xlsx')
 
@@ -100,6 +95,7 @@ def main():
     for i_epoch in range(1000):
         count = 0
         total_reward = 0
+        total_water = 0
         for i in range(2012,2022):
             start = 0
             temp_data = train_data[train_data.year == i]
@@ -137,6 +133,7 @@ def main():
                     print(water,action,next_water,reward)
 
                     total_reward = total_reward + reward
+                    total_water = total_water + next_water
                     #trans = Transition(state, action, action_prob, reward, next_state)
                     #agent.store_transition(trans)
                     agent.buffer.rewards.append(reward)
@@ -148,18 +145,20 @@ def main():
                 start = start+max_single_seq 
                 count = count + 1
                 agent.update()
-        print("training Epoch : {} \t\t Average Reward : {}".format(i_epoch, total_reward/count))
-        writer.add_scalar('train_avg_total_reward', total_reward/count, global_step=i_epoch)
+        print("training Epoch : {} \t\t Average Reward : {} \t\t Average Water : {}".format(i_epoch, total_reward/count, total_water/count))
+        writer.add_scalar('reward/train', total_reward/count, global_step=i_epoch)
+        writer.add_scalar('water/train', total_water/count, global_step=i_epoch)
         if (i_epoch+1)%3 == 0:
             agent.decay_action_std(action_std_decay_rate, min_action_std)
 
         if i_epoch%10==0:
-            path = '../../result/model/PPO_'+str(max_single_seq)+'_'+str(irrigation_time)+'_'+str(time.time())[:10]+'/'
+            path = '../../result/model/PPO_'+str(max_single_seq)+'_'+str(irrigation_time)+'_'+config_profile+'/'
             os.makedirs(path)
             checkpoint_pth = path+'model_'+ str(i_epoch) +'.pkl'
             agent.save(checkpoint_pth)
         start = 0
         total_reward = 0
+        total_water = 0
         count = 0
         while start<len(test_data.index)-1:
             water = 0
@@ -191,15 +190,22 @@ def main():
                     reward = p_v[1]*(v_mad - next_water)+p_a[2]*action
                 reward = -np.squeeze(reward)
                 total_reward = total_reward + reward
+                total_water = total_water + next_water
                 water = next_water
                 state = next_state
             start = start+max_single_seq
             count = count + 1
-        writer.add_scalar('test_avg_total_reward', total_reward/count, global_step=i_epoch)
-        
-        print("testing Epoch : {} \t\t Average Reward : {}".format(i_epoch, total_reward/count))
+        writer.add_scalar('reward/test', total_reward/count, global_step=i_epoch)
+        writer.add_scalar('water/test', total_water/count, global_step=i_epoch)
+        print("testing Epoch : {} \t\t Average Reward : {} \t\t Average Water : {}".format(i_epoch, total_reward/count,  total_water/count))
         agent.buffer.clear()
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config_file", default='../../configs/train_simulation.ini')
+    parser.add_argument("--config", default='potato3')
+    args = parser.parse_args()
+    config = configparser.ConfigParser()
+    config.read(args.config_file)
+    main(args,config)
     print("end")

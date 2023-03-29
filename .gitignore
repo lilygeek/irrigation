@@ -1,5 +1,5 @@
 result/
 data/
-configs/
+configs/mailing*
 *.pptx
 .DS_Store
