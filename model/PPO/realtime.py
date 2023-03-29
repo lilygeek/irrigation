@@ -128,12 +128,10 @@ class Device:
             msg = EmailMessage()
 
             msg.set_content("Current water content is:"+str(water)+", please apply " + str(action) + "inches water to " + self.name + " now.")
-
             msg['Subject'] = '[Important][Irrigation]'
             msg['From'] = config['DEFAULT']['sender']
             sender = config['DEFAULT']['sender']
             password = config['DEFAULT']['password']
-
             recipients = config['FULL']['recipients'].split(',')
             msg['To'] = config['FULL']['recipients']
 
