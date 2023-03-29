@@ -39,7 +39,7 @@ P1 = "60f7fa8f73efc3551fcd3e48"
 P2 = "62b9ad9d1d847216e1be5da1"
 P3 = "60f9b6a373efc34b71817757"
 P4 = "60c17c1c73efc3519d587d7c"
-IDs = [P3]
+IDs = [P1,P2,P3,P4]
 Devices = []
 
 def group_statics(dic_list):
@@ -56,10 +56,11 @@ def group_statics(dic_list):
 
 class Device:
 
-    def __init__(self, ID, name, irrigation_time,agent):
+    def __init__(self, ID, name, irrigation_time,agent,args):
         self.ID = ID
         self.name = name
         self.url = BaseURL+"/api/v1.6/datasources/"+ self.ID + "/variables?token=" + Token;
+        self.aux_url = BaseURL+"/api/v1.6/datasources/"+ P3 + "/variables?token=" + Token;
         self.time = irrigation_time
         self.agent = agent
         self.temp = []
@@ -73,7 +74,13 @@ class Device:
         self.last_state = []
         self.action = 0
         self.last_irrigation = time.time()
-
+        if args.update:
+            self.model_path = args.directory+"model/online_update_"+args.ppo_path
+            self.log_path = args.directory+"log/runs/online_update_"+args.ppo_path
+        else:
+            self.model_path = args.directory+"model/online_"+args.ppo_path
+            self.log_path = args.directory+"log/runs/online_"+args.ppo_path
+        self.writer = SummaryWriter(self.log_path)
     #只适用于weather？ 湿度只看当前的
 
     def add_weather(self,variable, value, hour, timestamp):
@@ -106,24 +113,32 @@ class Device:
 
             state = np.array([month,rpet,pcpn,temp_max,temp_min,temp_mean,humid_max,humid_min,humid_mean,srad,wdsd,water])
 
-            reward = PPO_funcs.reward_cal(self.agent,self.action,water)
-            dt = datetime.fromtimestamp(timestamp/1000)
+            if self.timesteps>0:
+                reward = PPO_funcs.reward_cal(self.agent,self.action,water,self.name)
+                dt = datetime.fromtimestamp(timestamp/1000)
 
-            print("with state:",self.last_state,",apply ",self.action,", the day before "+str(dt) + " got the irrigation reward of " + str(reward))
+                print("with state:",self.last_state,",apply ",self.action,", the day before "+str(dt) + " got the irrigation reward of " + str(reward))
 
-            if args.update:
-                PPO_funcs.buffering(self.agent,state,action)
-                self.timesteps = self.timesteps + 1
-                if self.timesteps % 7==0:
-                    self.agent.update()
-                    #checkpoint_pth = '../../result/model/model_'+str(max_single_seq)+'_'+ str(time.time())[:10] +'.pkl'
-                    #agent.save(checkpoint_pth)
+                if args.update:
+                    PPO_funcs.buffering(self.agent,self.action,water)
+                    if self.timesteps % 7==0:
+                        self.agent.update()
+                        if not os.path.exists(self.path):
+                            os.makedirs(self.path)
+                        checkpoint_pth = self.path+"model_"+str(self.timesteps)'.pkl'
+                        agent.save(checkpoint_pth)
+
+                writer.add_scalar('reward', reward, global_step=self.timesteps)
+                writer.add_scalar('action', action, global_step=self.timesteps)
+                writer.add_scalar('water', water, global_step=self.timesteps)
                 
             self.last_state = state
             
             action = PPO_funcs.inference(self.agent,state)
 
             self.action = action
+
+            self.timesteps = self.timesteps + 1
 
             msg = EmailMessage()
 
@@ -132,8 +147,8 @@ class Device:
             msg['From'] = config['DEFAULT']['sender']
             sender = config['DEFAULT']['sender']
             password = config['DEFAULT']['password']
-            recipients = config['FULL']['recipients'].split(',')
-            msg['To'] = config['FULL']['recipients']
+            recipients = config[args.recipients]['recipients'].split(',')
+            msg['To'] = config[args.recipients]['recipients']
 
             with smtplib.SMTP_SSL('smtp.gmail.com',465) as s:
                 s.login(sender,password)
@@ -175,10 +190,10 @@ class Device:
             
                 
                     if variableName == "temp":
-                        print(variableName)
+                        #print(variableName)
                         self.temp = self.add_weather(self.temp,lastValue,dt.hour,lastTime)
                     elif variableName == "humid":
-                        print(variableName)
+                        #print(variableName)
                         self.humid = self.add_weather(self.humid,lastValue,dt.hour,lastTime)
                     elif variableName == "soil2":
                         water = water + lastValue*0.12
@@ -187,13 +202,40 @@ class Device:
                         water = water +lastValue*0.12
                         water_flag = water_flag+1
                     elif variableName == "solar radiation":
-                        print(variableName)
+                        #print(variableName)
                         self.par = self.add_weather(self.par,lastValue,dt.hour,lastTime)
                     elif variableName == "rpet":
-                        print(variableName)
+                        #print(variableName)
                         self.rpet = self.add_weather(self.rpet,lastValue,dt.hour,lastTime)
                     else:
                         pass
+
+                if self.name != 'potato3':
+                    r = await client.get(self.aux_url)
+
+                    result = r.json()
+                    result = result['results']
+                    
+                    for i in result:
+
+                        variableName = i["name"]
+                        lastValue = float(i['last_value']['value'])
+                        lastTime1 = i['last_activity']
+                        lastTime2 = i['last_value']['timestamp']
+
+                        lastTime = max(int(lastTime2),int(lastTime1))
+
+
+                        dt = datetime.fromtimestamp(lastTime/1000)
+                
+                        if variableName == "solar radiation":
+                            #print(variableName)
+                            self.par = self.add_weather(self.par,lastValue,dt.hour,lastTime)
+                        elif variableName == "rpet":
+                            #print(variableName)
+                            self.rpet = self.add_weather(self.rpet,lastValue,dt.hour,lastTime)
+                        else:
+                            pass
 
                 if water_flag == 2:
                     self.add_water(water, dt.year, dt.month, dt.hour, lastTime, args,config)
@@ -236,15 +278,17 @@ async def main(args,config):
     lr_critic = 0.001       # learning rate for critic network
 
     random_seed = 0         # set random seed if required (0 = no random seed)
+    i = 1
     for ID in IDs:
-        name = base# + str(i)
+        name = base + str(i)
 
         agent = PPO(num_state,num_action,lr_actor,lr_critic,gamma,K_epochs,eps_clip,has_continuous_action_space,action_std)
 
-        checkpoint_path = args.directory + args.ppo_path + args.model_file
-        print("loading network from : " + checkpoint_path + " for potato " + ID)
+        checkpoint_path = args.directory + "model/" + args.ppo_path + args.model_file
+        print("loading network from : " + checkpoint_path + " for " + name)
         agent.load(checkpoint_path)
-        Devices.append(Device(ID,name,irrigation_time,agent))
+        Devices.append(Device(ID,name,irrigation_time,agent,args))
+        i = i+1
 
     while True:
         task_list = []
@@ -264,7 +308,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--update", default=False)
     parser.add_argument("--mailing_config", default='../../configs/mailing.ini')
-    parser.add_argument("--directory", default="../../result/model/")
+    parser.add_argument("--directory", default="../../result/")
+    parser.add_argument("--recipients", default="DEFAULT")
     parser.add_argument("--ppo_path")
     parser.add_argument("--model_file")
     args = parser.parse_args()

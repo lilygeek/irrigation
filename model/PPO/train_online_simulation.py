@@ -199,7 +199,7 @@ def main(args,config):
         writer.add_scalar('reward/test', total_reward/count, global_step=i_epoch)
         writer.add_scalar('water/test', total_water/count, global_step=i_epoch)
         print("testing Epoch : {} \t\t Average Reward : {} \t\t Average Water : {}".format(i_epoch, total_reward/count,  total_water/count))
-        agent.buffer.clear()
+        #agent.buffer.clear()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
